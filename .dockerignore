@@ -1,18 +1,11 @@
 .venv/
 __pycache__/
+*.pyc
+.git/
 .env
-env.yaml
-
 documents/all notes/
-
-vectorstore/
-
 eval/data/
 eval/results/
-
-*.pyc
-
+*.ipynb
 .vscode/
 .idea/
-
-rag-anchor-project-plan.md

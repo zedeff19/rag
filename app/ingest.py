@@ -48,12 +48,9 @@ def embed_chunks(chunk_texts: list[str]) -> list[list[float]]:
     return embeddings.tolist()
 
 
-def ingest_file(conn, path: Path, chunk_size: int = CHUNK_SIZE, overlap: int = OVERLAP) -> dict:
-    """Ingest one already-validated file using the given connection.
-    Caller (ingest_path) is responsible for confirming the file exists and
-    has a supported extension."""
-    source_doc = str(path.resolve())
-    text = load_text(source_doc)
+def ingest_text(conn, source_doc: str, text: str, chunk_size: int = CHUNK_SIZE, overlap: int = OVERLAP) -> dict:
+    """Chunk, embed, and store already-loaded text under source_doc using the
+    given connection. Shared core for both disk-based and upload-based ingestion."""
     tokens = text.split()
     chunks = chunk_tokens(tokens, chunk_size, overlap) if tokens else []
     chunk_texts = [" ".join(chunk) for chunk in chunks]
@@ -65,6 +62,50 @@ def ingest_file(conn, path: Path, chunk_size: int = CHUNK_SIZE, overlap: int = O
     conn.commit()
 
     return {"path": source_doc, "chunks_inserted": len(chunk_texts)}
+
+
+def ingest_file(conn, path: Path, chunk_size: int = CHUNK_SIZE, overlap: int = OVERLAP) -> dict:
+    """Ingest one already-validated file using the given connection.
+    Caller (ingest_path) is responsible for confirming the file exists and
+    has a supported extension."""
+    source_doc = str(path.resolve())
+    text = load_text(source_doc)
+    return ingest_text(conn, source_doc, text, chunk_size, overlap)
+
+
+def ingest_uploads(files: list[tuple[str, bytes]], chunk_size: int = CHUNK_SIZE, overlap: int = OVERLAP) -> dict:
+    """Ingest a batch of in-memory uploads (filename, raw_bytes) pairs.
+    Mirrors ingest_path's directory-mode response shape."""
+    conn = get_connection()
+    try:
+        create_table(conn)
+
+        ingested, skipped = [], []
+        for filename, raw in files:
+            suffix = Path(filename).suffix.lower()
+            if suffix not in SUPPORTED_EXTENSIONS:
+                skipped.append({"path": filename, "reason": f"unsupported extension '{suffix or '(none)'}'"})
+                continue
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                skipped.append({"path": filename, "reason": f"failed to decode as UTF-8: {exc}"})
+                continue
+            try:
+                ingested.append(ingest_text(conn, filename, text, chunk_size, overlap))
+            except Exception as exc:
+                skipped.append({"path": filename, "reason": f"failed to ingest: {exc}"})
+
+        return {
+            "path": "<upload>",
+            "mode": "upload",
+            "files_ingested": ingested,
+            "files_skipped": skipped,
+            "total_files_ingested": len(ingested),
+            "total_chunks_inserted": sum(r["chunks_inserted"] for r in ingested),
+        }
+    finally:
+        conn.close()
 
 
 def ingest_path(path_str: str, chunk_size: int = CHUNK_SIZE, overlap: int = OVERLAP) -> dict:

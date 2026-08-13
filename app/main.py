@@ -5,14 +5,24 @@
 #   2. POST /query  - retrieve top-k chunks -> retrieve.py [done]
 #   3. POST /ask    - retrieve + generate a grounded answer -> generate.py [done]
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.generate import generate_answer
-from app.ingest import ingest_path
+from app.ingest import ingest_path, ingest_uploads
 from app.retrieve import retrieve_chunks
 
-app = FastAPI(title="RAG Anchor API")
+api_key_header = APIKeyHeader(name="X-API-Key")
+
+
+def require_api_key(key: str = Depends(api_key_header)) -> None:
+    if key != settings.api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+app = FastAPI(title="RAG Anchor API", dependencies=[Depends(require_api_key)])
 
 
 class IngestRequest(BaseModel):
@@ -46,6 +56,15 @@ def ingest(request: IngestRequest) -> IngestResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Ingestion failed due to an internal error.") from exc
+
+
+@app.post("/ingest/upload", response_model=IngestResponse)
+async def ingest_upload(files: list[UploadFile] = File(...)) -> IngestResponse:
+    try:
+        payloads = [(f.filename, await f.read()) for f in files]
+        return ingest_uploads(payloads)
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Ingestion failed due to an internal error.") from exc
 
