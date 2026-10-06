@@ -6,6 +6,7 @@
 #   3. POST /ask    - retrieve + generate a grounded answer -> generate.py [done]
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -23,6 +24,15 @@ def require_api_key(key: str = Depends(api_key_header)) -> None:
 
 
 app = FastAPI(title="RAG Anchor API", dependencies=[Depends(require_api_key)])
+
+# Lets the static frontend (frontend/index.html) call the API from the browser.
+# Auth is still enforced by the X-API-Key header, so open origins are fine here.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class IngestRequest(BaseModel):
